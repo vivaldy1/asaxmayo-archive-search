@@ -1,0 +1,14 @@
+name: Deploy Cloudflare Worker  # 名前を変えておくとActions画面で見分けやすいです
+on: 
+  push:
+    branches:
+      - main
+jobs:
+  deploy-to-cloudflare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
