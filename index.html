@@ -1160,9 +1160,9 @@
     <section class="search-section">
       <div class="target-tabs">
         <button class="target-tab active" data-value="all">すべて</button>
-        <button class="target-tab" data-value="subtitles">字幕</button>
         <button class="target-tab" data-value="comments">コメント</button>
         <button class="target-tab" data-value="chat">チャット</button>
+        <button class="target-tab" data-value="subtitles">字幕</button>
       </div>
       <div class="search-bar">
         <input id="searchInput" type="text" placeholder="キーワードを入力..." autocomplete="off">
@@ -1706,7 +1706,6 @@
       const url = getShareUrl();
       await copyToClipboard(url);
       showToast();
-      if (btn) { const orig = btn.textContent; btn.textContent = '✓ コピー済'; setTimeout(() => btn.textContent = orig, 1500); }
     }
 
     async function shareVideoSearch(dateStr, btn) {
@@ -1714,7 +1713,6 @@
       const url = getShareUrl({ from: dateStr, to: dateStr });
       await copyToClipboard(url);
       showToast();
-      if (btn) { const orig = btn.textContent; btn.textContent = '✓'; setTimeout(() => btn.textContent = orig, 1500); }
     }
 
     // ===== URLパラメータ適用（ページ読み込み時）=====
@@ -1810,7 +1808,7 @@
       let truncHtml = '';
       if (truncatedSources.length > 0) {
         const names = truncatedSources.map(s => sourceLabels[s] || s).join('・');
-        truncHtml = `<span class="truncation-note" title="表示件数が上限に達したため、一部が省略されています">⚠ ${names}は${LIMIT}件で打ち切り</span>`;
+        truncHtml = `<span class="truncation-note" title="表示件数が上限に達したため、一部が省略されています">⚠ ${names}は${LIMIT}件以降は表示されません</span>`;
       }
 
       container.innerHTML = `
