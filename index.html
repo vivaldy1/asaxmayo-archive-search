@@ -1277,24 +1277,23 @@
     const WORKERS_URL = 'https://loan-memo-api.urud08-u.workers.dev';
     const LIMIT = 200;
 
-    async function d1Query(sql, params = []) {
-      const label = sql.trim().substring(0, 60).replace(/\s+/g, ' ');
+    async function d1Action(action, params = {}) {
       const t0 = performance.now();
       const res = await fetch(WORKERS_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sql, params }),
+        body: JSON.stringify({ action, params }),
       });
       const t1 = performance.now();
-      console.log(`[d1Query] fetch完了: ${(t1 - t0).toFixed(0)}ms | "${label}"`);
+      console.log(`[d1Action] fetch完了: ${(t1 - t0).toFixed(0)}ms | action="${action}"`);
       if (!res.ok) throw new Error(`Workers error: ${res.status} ${res.statusText}`);
       const text = await res.text();
       const t2 = performance.now();
-      console.log(`[d1Query] ボディ受信: ${(t2 - t1).toFixed(0)}ms | ${(text.length / 1024).toFixed(1)}KB`);
+      console.log(`[d1Action] ボディ受信: ${(t2 - t1).toFixed(0)}ms | ${(text.length / 1024).toFixed(1)}KB`);
       const data = JSON.parse(text);
-      console.log(`[d1Query] 合計: ${(performance.now() - t0).toFixed(0)}ms | ${Array.isArray(data) ? data.length : 0}行`);
-      if (data.error) throw new Error(`D1 error: ${data.error}`);
-      return Array.isArray(data) ? data : [];
+      console.log(`[d1Action] 合計: ${(performance.now() - t0).toFixed(0)}ms | ${Array.isArray(data) ? data.length : JSON.stringify(data).length + 'chars'}` );
+      if (data && data.error) throw new Error(`D1 error: ${data.error}`);
+      return data;
     }
 
     // ===== ページタブ切り替え =====
@@ -1389,11 +1388,7 @@
       const listEl = document.getElementById('modDirectList');
       listEl.innerHTML = '<div style="padding:12px;font-size:13px;color:var(--text-dim)"><span class="spinner"></span>読み込み中...</div>';
       try {
-        const rows = await d1Query(
-          `SELECT DISTINCT role, author FROM live_chats
-         WHERE role IN ('OWNER','MODERATOR')
-         ORDER BY CASE role WHEN 'OWNER' THEN 0 ELSE 1 END, author`
-        );
+        const rows = await d1Action('get_mod_users');
         modDirectCache = rows.map(r => ({ user: r.author, role: r.role }));
         modDirectLoaded = true;
         renderModDirectList();
@@ -1454,51 +1449,22 @@
     }
 
     // ===== D1 検索共通 =====
-    function dateParams() {
-      const clauses = [], params = [];
-      if (dateFromVal) { clauses.push(`v.published_at >= ?`); params.push(dateFromVal); }
-      if (dateToVal) { clauses.push(`v.published_at <= ?`); params.push(dateToVal + ' 23:59:59'); }
-      return { clauses, params };
-    }
-
-    function buildKeywordCondition(column, keywordStr, mode = 'AND') {
-      if (!keywordStr) return { clause: '', params: [] };
-      // 全角スペースを半角スペースに変換し、連続するスペースを1つにして分割
-      const keywords = keywordStr.replace(/　/g, ' ').split(/\s+/).filter(k => k.length > 0);
-      if (keywords.length === 0) return { clause: '', params: [] };
-
-      const clauses = keywords.map(() => `${column} LIKE ?`);
-      const params = keywords.map(k => `%${k}%`);
-      const op = mode === 'OR' ? ' OR ' : ' AND ';
-      return { clause: `(${clauses.join(op)})`, params };
-    }
-
     function getSearchMode() {
       const el = document.getElementById('searchMode');
       return el ? el.value : 'AND';
     }
 
     async function searchSubtitles(kw) {
-      const d = dateParams();
       const order = getSortOrder();
       const mode = getSearchMode();
-      const kwCond = buildKeywordCondition('s.text', kw, mode);
+      const keywords = kw.replace(/　/g, ' ').split(/\s+/).filter(k => k.length > 0);
 
-      const where = [...d.clauses];
-      const params = [...d.params];
-      where.push(`v.title != '[unavailable]'`);
-      if (kwCond.clause) {
-        where.push(kwCond.clause);
-        params.push(...kwCond.params);
-      }
-
-      const whereSQL = where.length ? `WHERE ${where.join(' AND ')}` : '';
-      params.push(LIMIT);
-
-      const rows = await d1Query(
-        `SELECT v.published_at AS date, s.video_id, v.title, s.timestamp, s.seconds, s.text
-       FROM subtitles s JOIN videos v ON s.video_id = v.id
-       ${whereSQL} ORDER BY v.published_at ${order}, s.seconds LIMIT ?`, params);
+      const rows = await d1Action('search_subtitles', {
+        keywords, mode,
+        dateFrom: dateFromVal || undefined,
+        dateTo: dateToVal || undefined,
+        order, limit: LIMIT,
+      });
       const arr = rows.map(r => ({ source: 'Subtitles', date: r.date, videoId: r.video_id, title: r.title, timestamp: r.timestamp, role: '', user: '', text: r.text }));
       arr.truncated = rows.length >= LIMIT;
       arr.source = 'subtitles';
@@ -1506,26 +1472,16 @@
     }
 
     async function searchComments(kw) {
-      const d = dateParams();
       const order = getSortOrder();
       const mode = getSearchMode();
-      const kwCond = buildKeywordCondition('c.comment', kw, mode);
+      const keywords = kw.replace(/　/g, ' ').split(/\s+/).filter(k => k.length > 0);
 
-      const where = [...d.clauses];
-      const params = [...d.params];
-      where.push(`v.title != '[unavailable]'`);
-      if (kwCond.clause) {
-        where.push(kwCond.clause);
-        params.push(...kwCond.params);
-      }
-
-      const whereSQL = where.length ? `WHERE ${where.join(' AND ')}` : '';
-      params.push(LIMIT);
-
-      const rows = await d1Query(
-        `SELECT v.published_at AS date, c.video_id, v.title, c.author, c.comment
-       FROM comments c JOIN videos v ON c.video_id = v.id
-       ${whereSQL} ORDER BY v.published_at ${order} LIMIT ?`, params);
+      const rows = await d1Action('search_comments', {
+        keywords, mode,
+        dateFrom: dateFromVal || undefined,
+        dateTo: dateToVal || undefined,
+        order, limit: LIMIT,
+      });
       const arr = rows.map(r => ({ source: 'Comments', date: r.date, videoId: r.video_id, title: r.title, timestamp: '', role: '', user: r.author, text: r.comment }));
       arr.truncated = rows.length >= LIMIT;
       arr.source = 'comments';
@@ -1533,30 +1489,17 @@
     }
 
     async function searchLiveChat(kw, userId) {
-      const d = dateParams();
       const order = getSortOrder();
-      const mode = getSearchMode(); // Mod検索時は単一またはAND想定だが共通化のため取得
-      const kwCond = buildKeywordCondition('lc.message', kw, mode);
+      const mode = getSearchMode();
+      const keywords = kw ? kw.replace(/　/g, ' ').split(/\s+/).filter(k => k.length > 0) : [];
 
-      const where = [...d.clauses];
-      const params = [...d.params];
-      where.push(`v.title != '[unavailable]'`);
-      if (kwCond.clause) {
-        where.push(kwCond.clause);
-        params.push(...kwCond.params);
-      }
-      if (userId) {
-        where.push(`lc.author = ?`);
-        params.push(userId);
-      }
-
-      const whereSQL = where.length ? `WHERE ${where.join(' AND ')}` : '';
-      params.push(LIMIT);
-
-      const rows = await d1Query(
-        `SELECT v.published_at AS date, lc.video_id, v.title, lc.timestamp, lc.role, lc.author, lc.message, lc.type
-       FROM live_chats lc JOIN videos v ON lc.video_id = v.id
-       ${whereSQL} ORDER BY v.published_at ${order}, lc.timestamp LIMIT ?`, params);
+      const rows = await d1Action('search_live_chats', {
+        keywords, mode,
+        dateFrom: dateFromVal || undefined,
+        dateTo: dateToVal || undefined,
+        order, limit: LIMIT,
+        userId: userId || undefined,
+      });
       const arr = rows.map(r => ({ source: 'Live Chat', date: r.date, videoId: r.video_id, title: r.title, timestamp: r.timestamp, role: r.role, user: r.author, text: r.message, type: r.type }));
       arr.truncated = rows.length >= LIMIT;
       arr.source = 'chat';
@@ -1874,20 +1817,14 @@
       console.group('[loadAdminData] 動画一覧 初回ロード開始');
 
       try {
-        console.log('[loadAdminData] ① 並列COUNTクエリ×4 開始');
         const t1 = performance.now();
-        const [videoRows, commentRows, chatRows, subtitleRows] = await Promise.all([
-          d1Query(`SELECT COUNT(*) AS cnt FROM videos`),
-          d1Query(`SELECT COUNT(*) AS cnt FROM comments`),
-          d1Query(`SELECT COUNT(*) AS cnt FROM live_chats`),
-          d1Query(`SELECT COUNT(*) AS cnt FROM subtitles`),
-        ]);
-        console.log(`[loadAdminData] ① 並列COUNTクエリ 完了: ${(performance.now() - t1).toFixed(0)}ms`);
+        const counts = await d1Action('count_all');
+        console.log(`[loadAdminData] ① count_all 完了: ${(performance.now() - t1).toFixed(0)}ms`);
 
-        const totalVideos    = videoRows[0]?.cnt    || 0;
-        const totalComments  = commentRows[0]?.cnt  || 0;
-        const totalChat      = chatRows[0]?.cnt      || 0;
-        const totalSubtitles = subtitleRows[0]?.cnt  || 0;
+        const totalVideos    = counts.videos    || 0;
+        const totalComments  = counts.comments  || 0;
+        const totalChat      = counts.live_chats || 0;
+        const totalSubtitles = counts.subtitles || 0;
         console.log(`[loadAdminData]   動画総数: ${totalVideos}`);
 
         const t2 = performance.now();
@@ -1924,22 +1861,10 @@
       const content = document.getElementById('adminContent');
       content.innerHTML = '<div style="text-align:center;padding:60px;color:var(--text-dim)"><span class="spinner"></span>読み込み中...</div>';
 
-      const sql = `
-        SELECT v.id, v.title, v.published_at,
-          COALESCE(cc.cnt, 0) AS comment_count,
-          COALESCE(lc.cnt, 0) AS chat_count,
-          COALESCE(sc.cnt, 0) AS subtitle_count
-        FROM videos v
-        LEFT JOIN (SELECT video_id, COUNT(*) AS cnt FROM comments   GROUP BY video_id) cc ON cc.video_id = v.id
-        LEFT JOIN (SELECT video_id, COUNT(*) AS cnt FROM live_chats GROUP BY video_id) lc ON lc.video_id = v.id
-        LEFT JOIN (SELECT video_id, COUNT(*) AS cnt FROM subtitles  GROUP BY video_id) sc ON sc.video_id = v.id
-        WHERE v.title != '[unavailable]'
-        ORDER BY v.published_at DESC`;
-
       console.group('[fetchAndRenderAdminTable]');
       const t0 = performance.now();
       try {
-        const rows = await d1Query(sql, []);
+        const rows = await d1Action('get_video_list');
         console.log(`[fetchAndRenderAdminTable] クエリ完了: ${(performance.now() - t0).toFixed(0)}ms | ${rows.length}件`);
         adminDataCache = rows;
         renderAdminTable();
@@ -2071,11 +1996,11 @@
       try {
         let rows = [];
         if (type === 'subtitles') {
-          rows = await d1Query(`SELECT timestamp, text FROM subtitles WHERE video_id = ? ORDER BY seconds`, [videoId]);
+          rows = await d1Action('get_video_subtitles', { videoId });
         } else if (type === 'comments') {
-          rows = await d1Query(`SELECT author, comment AS text FROM comments WHERE video_id = ? ORDER BY rowid`, [videoId]);
+          rows = await d1Action('get_video_comments', { videoId });
         } else if (type === 'livechat') {
-          rows = await d1Query(`SELECT timestamp, author, message AS text, role, type FROM live_chats WHERE video_id = ? ORDER BY timestamp`, [videoId]);
+          rows = await d1Action('get_video_livechat', { videoId });
           // 文字列ソートだと "1:00:00" < "59:00" になるため、JS側で秒数ソート
           rows.sort((a, b) => toSeconds(a.timestamp) - toSeconds(b.timestamp));
         }
