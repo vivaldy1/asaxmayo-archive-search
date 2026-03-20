@@ -10,6 +10,9 @@
   <link
     href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&family=Noto+Sans+JP:wght@300;400&display=swap"
     rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1"></script>
   <style>
     :root {
       --bg: #0d0c0a;
@@ -1321,6 +1324,41 @@
   <!-- コピー完了トースト -->
   <div id="copyToast" class="copy-toast">🔗 URLをコピーしました</div>
 
+  <!-- ハイライトグラフモーダル -->
+  <div id="highlightModal" class="modal-overlay" onclick="if(event.target===this) closeHighlightModal()">
+    <div class="modal-container" style="max-width: 800px;">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <span class="modal-type-badge" style="background:var(--gold)">グラフ</span>
+          <span id="highlightModalTitle" class="modal-title"></span>
+        </div>
+        <button class="modal-close" onclick="closeHighlightModal()">×</button>
+      </div>
+      <div id="highlightModalControls" style="padding: 12px 20px; border-bottom: 1px solid var(--border); display: flex; gap: 20px; align-items: center; background: var(--bg3);">
+        <div style="display:flex; align-items:center; gap:6px;">
+          <label style="font-size:12px;color:var(--text-dim);">集計間隔：</label>
+          <select id="highlightIntervalSelect" class="date-input" style="padding:4px 8px;font-size:13px;" onchange="renderHighlightChart()">
+            <option value="60">1分</option>
+            <option value="120" selected>2分</option>
+            <option value="300">5分</option>
+            <option value="600">10分</option>
+          </select>
+        </div>
+        <div style="display:flex; align-items:center; gap:6px;">
+          <label style="font-size:12px;color:var(--text-dim);">グラフ種類：</label>
+          <select id="highlightTypeSelect" class="date-input" style="padding:4px 8px;font-size:13px;" onchange="renderHighlightChart()">
+            <option value="line" selected>折れ線グラフ</option>
+            <option value="bar">棒グラフ</option>
+          </select>
+        </div>
+        <button class="share-btn" style="margin-left:auto;" onclick="if(chartInstance) chartInstance.resetZoom()" title="グラフの拡大表示を元に戻す">🔍 リセット</button>
+      </div>
+      <div id="highlightModalBody" class="modal-body" style="height: 400px; display:flex; align-items:center; justify-content:center;">
+        <canvas id="highlightChartCtx" style="display:none;"></canvas>
+      </div>
+    </div>
+  </div>
+
   <!-- 詳細モーダル -->
   <div id="detailModal" class="modal-overlay" onclick="if(event.target===this) closeModal()">
     <div class="modal-container">
@@ -2051,6 +2089,7 @@
         <td class="num ${cc ? 'has-data badge-comments' : 'zero'}" onclick="${cc ? `showDetailModal('${r.id}', '${escHtml(r.title.replace(/'/g, "\'"))}', 'comments')` : ''}">${cc.toLocaleString()}</td>
         <td class="num ${lc ? 'has-data badge-chat' : 'zero'}" onclick="${lc ? `showDetailModal('${r.id}', '${escHtml(r.title.replace(/'/g, "\'"))}', 'livechat')` : ''}">${lc.toLocaleString()}</td>
         <td class="num ${sc ? 'has-data badge-subs' : 'zero'}" onclick="${sc ? `showDetailModal('${r.id}', '${escHtml(r.title.replace(/'/g, "\'"))}', 'subtitles')` : ''}">${sc.toLocaleString()}</td>
+        <td class="num ${lc ? 'has-data' : 'zero'}" style="text-align:center" title="${lc ? '草グラフを表示' : ''}" onclick="${lc ? `showHighlightGraph('${r.id}', '${escHtml(r.title.replace(/'/g, "\\'"))}')` : ''}">${lc ? '📊' : '-'}</td>
       </tr>`;
       }).join('');
 
@@ -2062,9 +2101,10 @@
               <th class="${thClass('published_at')}" onclick="handleSort('published_at')" style="width:110px">日付 ${getSortIcon('published_at')}</th>
               <th style="width:136px">サムネイル</th>
               <th class="${thClass('title')}" onclick="handleSort('title')">タイトル ${getSortIcon('title')}</th>
-              <th class="num ${thClass('comment_count')}" onclick="handleSort('comment_count')" style="color:#8dcf8d;width:100px">コメント ${getSortIcon('comment_count')}</th>
-              <th class="num ${thClass('chat_count')}" onclick="handleSort('chat_count')" style="color:#d4956a;width:100px">LiveChat ${getSortIcon('chat_count')}</th>
-              <th class="num ${thClass('subtitle_count')}" onclick="handleSort('subtitle_count')" style="color:#7bb8e8;width:100px">字幕 ${getSortIcon('subtitle_count')}</th>
+              <th class="num ${thClass('comment_count')}" onclick="handleSort('comment_count')" style="color:#8dcf8d;width:90px">コメント ${getSortIcon('comment_count')}</th>
+              <th class="num ${thClass('chat_count')}" onclick="handleSort('chat_count')" style="color:#d4956a;width:90px">LiveChat ${getSortIcon('chat_count')}</th>
+              <th class="num ${thClass('subtitle_count')}" onclick="handleSort('subtitle_count')" style="color:#7bb8e8;width:90px">字幕 ${getSortIcon('subtitle_count')}</th>
+              <th style="width:60px; text-align:center;">草グラフ</th>
             </tr>
           </thead>
           <tbody>${tbody}</tbody>
@@ -2189,6 +2229,171 @@
       if (item.source === 'Subtitles') return '字幕';
       if (item.source === 'Comments') return 'コメント';
       return 'チャット';
+    }
+
+    // ===== ハイライトグラフモーダル制御 =====
+    let chartInstance = null;
+    let currentHighlightVideoId = null;
+    let currentHighlightData = null;
+
+    async function showHighlightGraph(videoId, videoTitle) {
+      const modal = document.getElementById('highlightModal');
+      const titleEl = document.getElementById('highlightModalTitle');
+      const bodyEl = document.getElementById('highlightModalBody');
+      
+      titleEl.textContent = videoTitle;
+      currentHighlightVideoId = videoId;
+      modal.classList.add('active');
+      document.body.style.overflow = 'hidden';
+
+      bodyEl.innerHTML = '<div class="modal-loading" id="graphLoading"><span class="spinner"></span>データ取得・集計中...</div><div style="position:relative; width:100%; height:100%;"><canvas id="highlightChartCtx" style="display:none;"></canvas></div>';
+
+      try {
+        const rows = await d1Action('get_video_livechat', { videoId });
+        currentHighlightData = rows;
+        if (!rows.length) {
+          bodyEl.innerHTML = '<div class="modal-loading">チャットデータがありません</div>';
+          return;
+        }
+
+        renderHighlightChart();
+      } catch (e) {
+        bodyEl.innerHTML = `<div class="modal-loading" style="color:#e88">読み込み失敗: ${escHtml(e.message)}</div>`;
+      }
+    }
+
+    function renderHighlightChart() {
+      if (!currentHighlightData || !currentHighlightData.length) return;
+
+      const interval = parseInt(document.getElementById('highlightIntervalSelect').value, 10);
+      const chartType = document.getElementById('highlightTypeSelect').value;
+
+      const regex = /[wｗ笑草]+|:_草まよ:/i;
+      let maxSeconds = 0;
+      
+      const parsedRows = currentHighlightData.map(r => {
+        const sec = toSeconds(r.timestamp);
+        if (sec > maxSeconds) maxSeconds = sec;
+        return { sec, text: r.text };
+      });
+
+      const numBins = Math.floor(maxSeconds / interval) + 1;
+      const bins = new Array(numBins).fill(0);
+
+      parsedRows.forEach(r => {
+        if (regex.test(r.text)) {
+          const binIdx = Math.floor(r.sec / interval);
+          if (binIdx >= 0 && binIdx < numBins) {
+            bins[binIdx]++;
+          }
+        }
+      });
+
+      const labels = [];
+      const intervalMins = interval / 60;
+      const formatMinToTime = (m) => {
+        const hh = Math.floor(m / 60);
+        const mm = Math.floor(m % 60);
+        return hh > 0 ? `${hh}:${String(mm).padStart(2, '0')}:00` : `${mm}:00`;
+      };
+
+      for (let i = 0; i < numBins; i++) {
+        const mins = i * intervalMins;
+        labels.push(formatMinToTime(mins));
+      }
+
+      const loadingEl = document.getElementById('graphLoading');
+      if (loadingEl) loadingEl.style.display = 'none';
+      const canvas = document.getElementById('highlightChartCtx');
+      if (canvas) canvas.style.display = 'block';
+
+      if (chartInstance) {
+        chartInstance.destroy();
+      }
+
+      const isLine = chartType === 'line';
+
+      chartInstance = new Chart(canvas, {
+        type: chartType,
+        data: {
+          labels: labels,
+          datasets: [{
+            label: '草カウント',
+            data: bins,
+            tension: isLine ? 0.4 : 0.1,
+            fill: isLine,
+            backgroundColor: isLine ? 'rgba(200, 169, 110, 0.2)' : 'rgba(200, 169, 110, 0.8)',
+            borderColor: 'rgba(200, 169, 110, 1)',
+            borderWidth: isLine ? 2 : 1,
+            pointBackgroundColor: 'rgba(200, 169, 110, 1)',
+            pointRadius: isLine ? 2 : 0,
+            pointHoverRadius: isLine ? 4 : 0,
+            hoverBackgroundColor: !isLine ? 'rgba(255, 210, 0, 0.9)' : undefined
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            x: {
+              ticks: { color: '#8a8070' },
+              grid: { color: 'rgba(200, 169, 110, 0.1)' }
+            },
+            y: {
+              beginAtZero: true,
+              ticks: { stepSize: 1, color: '#8a8070' },
+              grid: { color: 'rgba(200, 169, 110, 0.1)' }
+            }
+          },
+          plugins: {
+            legend: {
+              labels: { color: '#e8e0d0', font: { family: "'Noto Sans JP', sans-serif" } }
+            },
+            tooltip: {
+              callbacks: {
+                title: function(context) {
+                  const idx = context[0].dataIndex;
+                  const startMin = idx * intervalMins;
+                  const endMin = startMin + intervalMins;
+                  return `${formatMinToTime(startMin)} ～ ${formatMinToTime(endMin)}`;
+                }
+              }
+            },
+            zoom: {
+              pan: {
+                enabled: true,
+                mode: 'x'
+              },
+              zoom: {
+                wheel: { enabled: true },
+                drag: { enabled: true, backgroundColor: 'rgba(200, 169, 110, 0.2)' },
+                pinch: { enabled: true },
+                mode: 'x'
+              }
+            }
+          },
+          onHover: (event, activeEls) => {
+            event.native.target.style.cursor = activeEls.length > 0 ? 'pointer' : 'default';
+          },
+          onClick: (e, activeEls) => {
+            if (activeEls.length > 0) {
+              const idx = activeEls[0].index;
+              const startTime = idx * interval;
+              const url = `https://www.youtube.com/watch?v=${currentHighlightVideoId}&t=${startTime}s`;
+              window.open(url, '_blank');
+            }
+          }
+        }
+      });
+    }
+
+    function closeHighlightModal() {
+      document.getElementById('highlightModal').classList.remove('active');
+      document.body.style.overflow = '';
+      if (chartInstance) {
+        chartInstance.destroy();
+        chartInstance = null;
+      }
     }
   </script>
 </body>
