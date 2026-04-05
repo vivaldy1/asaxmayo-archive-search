@@ -150,7 +150,7 @@ async function handleAction(db, action, params) {
     // -----------------------------------------------------------------------
     case "count_all": {
       const [videoRes, commentRes, chatRes, subtitleRes] = await Promise.all([
-        db.prepare(`SELECT COUNT(*) AS cnt FROM videos`).all(),
+        db.prepare(`SELECT COUNT(*) AS cnt FROM videos WHERE title != '[unavailable]'`).all(),
         db.prepare(`SELECT COUNT(*) AS cnt FROM comments`).all(),
         db.prepare(`SELECT COUNT(*) AS cnt FROM live_chats`).all(),
         db.prepare(`SELECT COUNT(*) AS cnt FROM subtitles`).all(),
