@@ -1060,6 +1060,23 @@
       border-bottom: none;
     }
 
+    .modal-item-highlight {
+      background: rgba(200, 169, 110, 0.12);
+      border-radius: var(--radius);
+      outline: 1px solid var(--gold-dim);
+    }
+
+    .hit-source.clickable {
+      cursor: pointer;
+      transition: background .15s, border-color .15s, color .15s;
+    }
+
+    .hit-source.clickable:hover {
+      background: rgba(200, 169, 110, 0.15);
+      border-color: var(--gold-dim);
+      color: var(--gold);
+    }
+
     .modal-item-meta {
       display: flex;
       gap: 12px;
@@ -1990,9 +2007,24 @@
             : `<div class="hit-ts"></div>`;
           const row = document.createElement('div');
           row.className = 'hit-row';
+
+          // 字幕・チャットはソースバッジをクリックでモーダル表示＋スクロール
+          const isScrollable = item.source === 'Subtitles' || item.source === 'Live Chat';
+          const modalType = item.source === 'Subtitles' ? 'subtitles' : 'livechat';
+
           row.innerHTML = `${tsHtml}
-          <div class="hit-source ${sourceClass(item)}">${sourceLabel(item)}</div>
+          <div class="hit-source ${sourceClass(item)}${isScrollable ? ' clickable' : ''}" ${isScrollable ? 'title="一覧を開いてこの行までジャンプ"' : ''}>${sourceLabel(item)}</div>
           <div class="hit-text">${highlight(item.text, keyword)}</div>`;
+
+          if (isScrollable) {
+            row.querySelector('.hit-source').addEventListener('click', () => {
+              showDetailModal(group.videoId, group.title, modalType, {
+                timestamp: item.timestamp,
+                text: item.text,
+              });
+            });
+          }
+
           groupEl.appendChild(row);
         });
         container.appendChild(groupEl);
@@ -2172,7 +2204,8 @@
     function escRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
     // ===== 詳細モーダル制御 =====
-    async function showDetailModal(videoId, videoTitle, type) {
+    // scrollTarget: { timestamp, text } — 指定された行までスクロールする（省略可）
+    async function showDetailModal(videoId, videoTitle, type, scrollTarget = null) {
       const modal = document.getElementById('detailModal');
       const modalType = document.getElementById('modalType');
       const modalTitle = document.getElementById('modalTitle');
@@ -2205,7 +2238,7 @@
         // @有無どちらの表記でもオーナー判定できるようにする
         const isOwnerAuthor = (author) => !!author && author.replace(/^@/, '').toLowerCase() === 'asaxmayo';
 
-        const html = rows.map(r => {
+        const html = rows.map((r, idx) => {
           // ── タイムスタンプ: livechat / subtitles はクリックで動画ジャンプ ──
           // 0:00（動画先頭）も含めてリンク化する
           let tsHtml = '';
@@ -2239,13 +2272,34 @@
           else if (isOwnerAuthor(r.author)) textStyle = 'color:#b464ff';
 
           return `
-          <div class="modal-item">
+          <div class="modal-item" data-idx="${idx}">
             <div class="modal-item-meta">${tsHtml}${authorHtml}</div>
             <div class="modal-item-text"${textStyle ? ` style="${textStyle}"` : ''}>${escHtml(r.text)}</div>
           </div>`;
         }).join('');
 
         modalBody.innerHTML = html;
+
+        // ── スクロール処理 ──
+        if (scrollTarget) {
+          const targetSec = toSeconds(normalizeTimestamp(scrollTarget.timestamp));
+          const targetText = (scrollTarget.text || '').trim();
+
+          // タイムスタンプが最も近く、テキストも一致する行を探す
+          let bestIdx = 0, bestScore = Infinity;
+          rows.forEach((r, i) => {
+            const secDiff = Math.abs(toSeconds(normalizeTimestamp(r.timestamp)) - targetSec);
+            const textMatch = (r.text || '').trim() === targetText ? 0 : 1;
+            const score = secDiff * 10 + textMatch;
+            if (score < bestScore) { bestScore = score; bestIdx = i; }
+          });
+
+          const el = modalBody.querySelector(`[data-idx="${bestIdx}"]`);
+          if (el) {
+            el.classList.add('modal-item-highlight');
+            requestAnimationFrame(() => el.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+          }
+        }
       } catch (e) {
         modalBody.innerHTML = `<div class="modal-loading" style="color:#e88">読み込み失敗: ${escHtml(e.message)}</div>`;
       }
