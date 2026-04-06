@@ -150,7 +150,7 @@ async function handleAction(db, action, params) {
     // -----------------------------------------------------------------------
     case "count_all": {
       const [videoRes, commentRes, chatRes, subtitleRes] = await Promise.all([
-        db.prepare(`SELECT COUNT(*) AS cnt FROM videos WHERE title != '[unavailable]'`).all(),
+        db.prepare(`SELECT COUNT(*) AS cnt FROM videos WHERE title NOT LIKE '[%]'`).all(),
         db.prepare(`SELECT COUNT(*) AS cnt FROM comments`).all(),
         db.prepare(`SELECT COUNT(*) AS cnt FROM live_chats`).all(),
         db.prepare(`SELECT COUNT(*) AS cnt FROM subtitles`).all(),
@@ -176,7 +176,7 @@ async function handleAction(db, action, params) {
          LEFT JOIN (SELECT video_id, COUNT(*) AS cnt FROM comments   GROUP BY video_id) cc ON cc.video_id = v.id
          LEFT JOIN (SELECT video_id, COUNT(*) AS cnt FROM live_chats GROUP BY video_id) lc ON lc.video_id = v.id
          LEFT JOIN (SELECT video_id, COUNT(*) AS cnt FROM subtitles  GROUP BY video_id) sc ON sc.video_id = v.id
-         WHERE v.title != '[unavailable]'
+         WHERE v.title NOT LIKE '[%]'
          ORDER BY v.published_at DESC`
       ).all();
       return results;
@@ -233,7 +233,7 @@ async function handleAction(db, action, params) {
 //                            グループ同士はmode(AND/OR)で結合
 // ---------------------------------------------------------------------------
 function buildSearchWhere(keywords, mode, column, dateFrom, dateTo, keywordGroups) {
-  const conditions = ["v.title != '[unavailable]'"];
+  const conditions = ["v.title NOT LIKE '[%]'"];
   const bindParams = [];
 
   if (dateFrom) {
