@@ -248,7 +248,7 @@ async function init() {
       const pct = Math.round((s.count / max) * 100);
       const numClass = i < 3 ? 'rank-num top3' : 'rank-num';
       html += `
-        <div class="rank-item" style="--bar-w:0%;" data-pct="${pct}">
+        <div class="rank-item" style="--bar-w:0%;" data-pct="${pct}" ${if(s.tag_name==":_ナンカレー:"){'background: khaki'}}>
           <div class="rank-bar-bg"></div>
           <span class="${numClass}">${i + 1}</span>
           <span class="rank-tag">${s.tag_name}</span>
