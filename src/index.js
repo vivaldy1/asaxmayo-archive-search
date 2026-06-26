@@ -222,6 +222,48 @@ async function handleAction(db, action, params) {
       return results;
     }
 
+    // -----------------------------------------------------------------------
+    // LiveChat があるデータの最新日付を取得（「◯◯時点」表示用）
+    // -----------------------------------------------------------------------
+    case "get_latest_date": {
+      const { results } = await db.prepare(
+        `SELECT strftime('%Y-%m-%d', max(published_at)) AS latest_date
+         FROM videos
+         LEFT JOIN (SELECT DISTINCT video_id FROM live_chats) live_chats
+           ON videos.id = live_chats.video_id
+         WHERE live_chats.video_id IS NOT NULL`
+      ).all();
+      return results[0] ?? { latest_date: null };
+    }
+
+    // -----------------------------------------------------------------------
+    // スタンプ（絵文字タグ）の使用回数集計
+    // 返却: [{ tag_name: ":stamp_name:", count: N }, ...]
+    // -----------------------------------------------------------------------
+    case "get_stamp_counts": {
+      const { results } = await db.prepare(
+        `WITH RECURSIVE split_tags AS (
+           SELECT id,
+                  SUBSTR(message, INSTR(message, ':'), INSTR(SUBSTR(message, INSTR(message, ':') + 1), ':') + 1) AS tag,
+                  SUBSTR(message, INSTR(message, ':') + INSTR(SUBSTR(message, INSTR(message, ':') + 1), ':') + 1) AS remaining
+           FROM live_chats
+           WHERE message LIKE '%:%:%'
+           UNION ALL
+           SELECT id,
+                  SUBSTR(remaining, INSTR(remaining, ':'), INSTR(SUBSTR(remaining, INSTR(remaining, ':') + 1), ':') + 1) AS tag,
+                  SUBSTR(remaining, INSTR(remaining, ':') + INSTR(SUBSTR(remaining, INSTR(remaining, ':') + 1), ':') + 1) AS remaining
+           FROM split_tags
+           WHERE remaining LIKE '%:%:%'
+         )
+         SELECT REPLACE(tag, 'mayo', '') AS tag_name, COUNT(*) AS count
+         FROM split_tags
+         WHERE tag LIKE ':%:'
+         GROUP BY REPLACE(tag, 'mayo', '')
+         ORDER BY count DESC`
+      ).all();
+      return results;
+    }
+
     default:
       throw new Error(`Unknown action: ${action}`);
   }
