@@ -259,7 +259,8 @@ async function handleAction(db, action, params) {
          FROM split_tags
          WHERE tag LIKE ':%:'
          GROUP BY REPLACE(tag, 'mayo', '')
-         ORDER BY count DESC`
+         ORDER BY count DESC
+         LIMIT 50`
       ).all();
       return results;
     }
